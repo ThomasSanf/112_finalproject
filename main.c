@@ -1,14 +1,15 @@
 #include <SDL.h>
-#include <stdio.h>
-#include <stdbool.h>
 #include <SDL_ttf.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
 
 // Screen dimension constants
-const int SCREEN_WIDTH = 800;
-const int SCREEN_HEIGHT = 600;
+const int SCREEN_WIDTH = 880;
+const int SCREEN_HEIGHT = 800;
 
 // Game element dimensions
-const int PADDLE_WIDTH = 100;
+const int PADDLE_WIDTH = 400;
 const int PADDLE_HEIGHT = 20;
 const int BALL_SIZE = 15;
 const int BRICK_WIDTH = 80;
@@ -16,7 +17,7 @@ const int BRICK_HEIGHT = 30;
 const int NUM_BRICKS = 20;
 
 // Paddle movement speed
-const int PADDLE_SPEED = 30;
+const int PADDLE_SPEED = 20;
 
 // Structures for game elements
 typedef struct {
@@ -38,43 +39,28 @@ typedef struct {
 
 bool gameOver = false;
 int score = 0;
-int bestScore = 0;
 
-// Function to display the end screen
-void drawEndScreen(SDL_Surface *surface, int bestScore, TTF_Font *font) {
-    // Clear the screen
-    SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 0x00, 0x00, 0x00));
-
-    // Display game over message
-    SDL_Color textColor = { 255, 255, 255 };
-    SDL_Surface* textSurface = TTF_RenderText_Solid(font, "Game Over", textColor);
-    SDL_Rect textRect = { (SCREEN_WIDTH - textSurface->w) / 2, SCREEN_HEIGHT / 2 - textSurface->h, textSurface->w, textSurface->h };
-    SDL_BlitSurface(textSurface, NULL, surface, &textRect);
-    SDL_FreeSurface(textSurface);
-
-    // Display the best score
-    char bestScoreText[50];
-    sprintf(bestScoreText, "Best Score: %d", bestScore);
-    textSurface = TTF_RenderText_Solid(font, bestScoreText, textColor);
-    textRect = { (SCREEN_WIDTH - textSurface->w) / 2, SCREEN_HEIGHT / 2, textSurface->w, textSurface->h };
-    SDL_BlitSurface(textSurface, NULL, surface, &textRect);
-    SDL_FreeSurface(textSurface);
-
-    // Display restart instructions
-    textSurface = TTF_RenderText_Solid(font, "Press 'R' to Restart", textColor);
-    textRect = { (SCREEN_WIDTH - textSurface->w) / 2, SCREEN_HEIGHT / 2 + textSurface->h, textSurface->w, textSurface->h };
-    SDL_BlitSurface(textSurface, NULL, surface, &textRect);
-    SDL_FreeSurface(textSurface);
+// Function to get the best score from the file
+int getBestScore() {
+    int bestScore = 0;
+    FILE *file = fopen("scores.txt", "r");
+    if (file) {
+        char line[1024];
+        if (fgets(line, sizeof(line), file)) {
+            bestScore = atoi(line); // Convert string to integer
+        }
+        fclose(file);
+    }
+    return bestScore;
 }
 
-// Function to handle restart
-void restartGame(Paddle *paddle, Ball *ball, Brick bricks[]) {
-    // Initialize game elements
-    initPaddle(paddle);
-    initBall(ball);
-    initBricks(bricks);
-    score = 0;
-    gameOver = false;
+// Function to update the best score in the file
+void updateBestScore(int score) {
+    FILE *file = fopen("scores.txt", "w");
+    if (file) {
+        fprintf(file, "%d\n", score);
+        fclose(file);
+    }
 }
 
 // Initialize game elements
@@ -89,8 +75,8 @@ void initBall(Ball *ball) {
     ball->size = BALL_SIZE;
     ball->x = SCREEN_WIDTH / 2;
     ball->y = SCREEN_HEIGHT - PADDLE_HEIGHT - BALL_SIZE - 20;
-    ball->dx = 0.2; // Reduced horizontal speed
-    ball->dy = -0.2; // Reduced vertical speed
+    ball->dx = 10.f; // Horizontal speed
+    ball->dy = -10.f; // Vertical speed
 }
 
 void initBricks(Brick bricks[]) {
@@ -104,23 +90,26 @@ void initBricks(Brick bricks[]) {
 }
 
 // Function to draw paddle
-void drawPaddle(SDL_Surface *surface, Paddle *paddle) {
-    SDL_Rect rect = { paddle->x, paddle->y, paddle->width, paddle->height };
-    SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 255, 255, 255));
+void drawPaddle(SDL_Renderer *renderer, Paddle *paddle) {
+    SDL_Rect rect = { (int)paddle->x, (int)paddle->y, (int)paddle->width, (int)paddle->height };
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White
+    SDL_RenderFillRect(renderer, &rect);
 }
 
 // Function to draw ball
-void drawBall(SDL_Surface *surface, Ball *ball) {
-    SDL_Rect rect = { ball->x - ball->size / 2, ball->y - ball->size / 2, ball->size, ball->size };
-    SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 255, 255, 255));
+void drawBall(SDL_Renderer *renderer, Ball *ball) {
+    SDL_Rect rect = { (int)(ball->x - ball->size / 2), (int)(ball->y - ball->size / 2), (int)ball->size, (int)ball->size };
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White
+    SDL_RenderFillRect(renderer, &rect);
 }
 
 // Function to draw bricks
-void drawBricks(SDL_Surface *surface, Brick bricks[]) {
+void drawBricks(SDL_Renderer *renderer, Brick bricks[]) {
     for (int i = 0; i < NUM_BRICKS; ++i) {
         if (bricks[i].active) {
             SDL_Rect rect = { bricks[i].x, bricks[i].y, bricks[i].width, bricks[i].height };
-            SDL_FillRect(surface, &rect, SDL_MapRGB(surface->format, 255, 0, 0));
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red
+            SDL_RenderFillRect(renderer, &rect);
         }
     }
 }
@@ -136,51 +125,81 @@ bool checkCollision(Ball ball, Brick brick) {
     return false;
 }
 
+bool areAllBricksDestroyed(Brick bricks[]) {
+    for (int i = 0; i < NUM_BRICKS; ++i) {
+        if (bricks[i].active) {
+            return false; // If any brick is still active, return false
+        }
+    }
+    return true; // All bricks are destroyed
+}
+
 // Function to handle ball-brick collisions
 void handleBallBrickCollisions(Ball *ball, Brick bricks[]) {
     for (int i = 0; i < NUM_BRICKS; ++i) {
         if (bricks[i].active && checkCollision(*ball, bricks[i])) {
             bricks[i].active = false;  // Deactivate the brick
             ball->dy = -ball->dy;      // Change the ball's direction
-            break;  // Break after the first collision to avoid multiple collisions at once
+            score++;                   // Increase score
         }
     }
 }
 
-int main(int argc, char* args[]) {
-    SDL_Window* window = NULL;
-    SDL_Surface* screenSurface = NULL;
+// Function to display text
+void displayText(SDL_Renderer *renderer, TTF_Font *font, const char *text, SDL_Color color, int x, int y) {
+    SDL_Surface *textSurface = TTF_RenderText_Solid(font, text, color);
+    SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+    SDL_Rect textRect = { x, y, textSurface->w, textSurface->h };
+    SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
+    SDL_FreeSurface(textSurface);
+    SDL_DestroyTexture(textTexture);
+}
 
+int main(int argc, char* argv[])
+{
     // Initialize SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());
         return 1;
     }
 
+    // Initialize SDL_ttf
+    if (TTF_Init() == -1) {
+        printf("SDL_ttf could not initialize! TTF_Error: %s\n", TTF_GetError());
+        return 1;
+    }
+
     // Create window
-    window = SDL_CreateWindow("Brick Breaker", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    SDL_Window* window = SDL_CreateWindow("Brick Breaker", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     if (window == NULL) {
         printf("Window could not be created! SDL_Error: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
-    screenSurface = SDL_GetWindowSurface(window);
 
-    // Initialize TTF
-    if (TTF_Init() < 0) {
-        printf("TTF could not initialize! TTF_Error: %s\n", TTF_GetError());
+    // Create renderer for window
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (renderer == NULL) {
+        printf("Renderer could not be created! SDL_Error: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
 
-    // Load font
-    TTF_Font* font = TTF_OpenFont("your_font.ttf", 36); // Replace "your_font.ttf" with your font file path
-    if (font == NULL) {
-        printf("Failed to load font! TTF_Error: %s\n", TTF_GetError());
-        TTF_Quit();
+    // Load fonts
+    TTF_Font* font = TTF_OpenFont("Minecraft.ttf", 28); // Make sure to provide the correct path and size
+    if (!font) {
+        printf("Failed to load font! SDL_ttf Error: %s\n", TTF_GetError());
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
+
+    int bestScore = getBestScore();
+    bool playerWon = false;
+    // Set text color as white
+    SDL_Color textColor = {255, 255, 255, 255};
 
     // Game elements
     Paddle paddle;
@@ -194,89 +213,125 @@ int main(int argc, char* args[]) {
 
     // Main game loop
     bool quit = false;
+    bool gameRunning = true;  // Initialize the game as running
     SDL_Event e;
-
     while (!quit) {
         // Handle events on queue
         while (SDL_PollEvent(&e) != 0) {
             if (e.type == SDL_QUIT) {
                 quit = true;
             }
-            // Handle paddle movement
-            const Uint8 *state = SDL_GetKeyboardState(NULL);
-            if (state[SDL_SCANCODE_LEFT]) {
-                paddle.x -= PADDLE_SPEED;
-                if (paddle.x < 0) {
-                    paddle.x = 0;
-                }
+            switch (e.key.keysym.sym) {
+                case SDLK_LEFT:
+                    paddle.x -= PADDLE_SPEED;
+                    if (paddle.x < 0) {
+                        paddle.x = 0;
+                    }
+                    break;
+                case SDLK_RIGHT:
+                    paddle.x += PADDLE_SPEED;
+                    if (paddle.x > SCREEN_WIDTH - PADDLE_WIDTH) {
+                        paddle.x = SCREEN_WIDTH - PADDLE_WIDTH;
+                    }
+                    break;
+                    // ... other key handling ...
             }
-            if (state[SDL_SCANCODE_RIGHT]) {
-                paddle.x += PADDLE_SPEED;
-                if (paddle.x > SCREEN_WIDTH - paddle.width) {
-                    paddle.x = SCREEN_WIDTH - paddle.width;
+
+            if (e.type == SDL_KEYDOWN) {
+                if (e.key.keysym.sym == SDLK_r && !gameRunning) {
+                    // Reset the game when 'R' is pressed after Game Over
+                    gameRunning = true;
+                    gameOver = false;
+                    playerWon = false;
+                    score = 0;
+                    initPaddle(&paddle);
+                    initBall(&ball);
+                    initBricks(bricks);
                 }
-            }
-            if (gameOver && state[SDL_SCANCODE_R]) {
-                restartGame(&paddle, &ball, bricks);
             }
         }
 
-        if (!gameOver) {
+        if (gameRunning) {
+            // Your existing game logic for handling ball, collisions, and drawing goes here.
+
             // Update ball position
             ball.x += ball.dx;
             ball.y += ball.dy;
 
             // Collision with walls
-            if (ball.x <= 0 || ball.x >= SCREEN_WIDTH - ball.size) {
+            if (ball.x <= 0 || ball.x >= SCREEN_WIDTH - BALL_SIZE) {
                 ball.dx = -ball.dx;
             }
             if (ball.y <= 0) {
                 ball.dy = -ball.dy;
             }
+            if (ball.y >= SCREEN_HEIGHT - BALL_SIZE) {
+                gameOver = true;
+            }
 
             // Collision with paddle
-            if (ball.x >= paddle.x && ball.x <= paddle.x + paddle.width && ball.y >= paddle.y && ball.y <= paddle.y + paddle.height) {
+            if (ball.y + BALL_SIZE >= paddle.y &&
+                ball.x + BALL_SIZE > paddle.x &&
+                ball.x < paddle.x + PADDLE_WIDTH) {
                 ball.dy = -ball.dy;
             }
 
             // Handle ball-brick collisions
             handleBallBrickCollisions(&ball, bricks);
-
-            // Ball lost
-            if (ball.y >= SCREEN_HEIGHT) {
-                // Check if the current score is better than the best score
-                if (score > bestScore) {
-                    bestScore = score; // Update the best score
-                    // writeBestScore(bestScore); // Write the best score to the file (implement this function)
-                    printf("New Best Score: %d\n", bestScore);
-                }
-
-                // Restart the game
+            if (areAllBricksDestroyed(bricks)) {
+                playerWon = true;
                 gameOver = true;
+                gameRunning = false;
+            }
+            // Clear screen
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black
+            SDL_RenderClear(renderer);
+
+            // Draw game elements
+            drawPaddle(renderer, &paddle);
+            drawBall(renderer, &ball);
+            drawBricks(renderer, bricks);
+
+            // Display score
+            char scoreText[100];
+            sprintf(scoreText, "Score: %d", score);
+            displayText(renderer, font, scoreText, textColor, 20, 700);
+
+            // Check for game over
+            if (gameOver) {
+                if (score > bestScore) {
+                    bestScore = score;
+                    updateBestScore(score); // Update best score in the file
+                }
+                gameRunning = false;
             }
         }
 
-        // Clear screen
-        SDL_FillRect(screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0x00, 0x00, 0x00));
-
-        if (gameOver) {
-            // Display end screen
-            drawEndScreen(screenSurface, bestScore, font);
+        // Check for game over
+        if (!gameRunning) {
+            if (playerWon) {
+                displayText(renderer, font, "You Win! Press R to Restart", textColor, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 - 40);
+            } else {
+                displayText(renderer, font, "Game Over! Press R to Restart", textColor, SCREEN_WIDTH / 4, SCREEN_HEIGHT / 2 - 40);
+            }
+            //displayText(renderer, font, "Best Score: %d", textColor, SCREEN_WIDTH - 220, 760);
         }
-        else {
-            // Draw game elements
-            drawPaddle(screenSurface, &paddle);
-            drawBall(screenSurface, &ball);
-            drawBricks(screenSurface, bricks);
+        // Display best score
+        char bestScoreText[100];
+        sprintf(bestScoreText, "Best Score: %d", bestScore);
+        displayText(renderer, font, bestScoreText, textColor, SCREEN_WIDTH - 220, 700);
 
-            // Update the surface
-            SDL_UpdateWindowSurface(window);
-        }
+        // Update the screen
+        SDL_RenderPresent(renderer);
+
+        // Cap the frame rate
+        SDL_Delay(16); // Approximately 60 frames per second
     }
 
-    // Destroy window and quit SDL
-    SDL_DestroyWindow(window);
+    // Cleanup
     TTF_CloseFont(font);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
     TTF_Quit();
     SDL_Quit();
 
